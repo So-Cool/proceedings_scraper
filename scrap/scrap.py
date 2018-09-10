@@ -5,8 +5,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import itertools
 import os
 import pandas as pd
+import pickle
 import PyPDF2
 import re
 import requests
@@ -15,6 +17,13 @@ import bs4
 
 ROOT_TEMPDIR = os.path.expanduser('~/scraper_temp_pdfs/')
 FIX_PYPDF2 = True
+
+def subdict(dictionary, key_subset):
+    subdict = {}
+    for key in key_subset:
+        if key in dictionary:
+            subdict[key] = dictionary.get(key)
+    return subdict
 
 # Print iterations progress
 # https://stackoverflow.com/questions/3173320/text-progress-bar-in-the-console
@@ -144,7 +153,6 @@ if FIX_PYPDF2:
     # PyPDF2.pdf.PageObject.extractText = _extractText
     PyPDF2.pdf.PageObject = PageObject
 
-
 def create_dir(new_dir):
    if not os.path.exists(new_dir):
         os.makedirs(new_dir)
@@ -163,9 +171,14 @@ def load_webpage(url):
     page.close()
     return page_contents
 
-def extract_html_elemennt(webpage, class_name):
+def extract_html_class(webpage, class_name):
     soup = bs4.BeautifulSoup(webpage, 'html.parser')
     papers_html = soup.find_all(class_=class_name)  # Extract tags with given class
+    return papers_html
+
+def extract_html_tag(webpage, tag_name):
+    soup = bs4.BeautifulSoup(webpage, 'html.parser')
+    papers_html = soup.find_all(tag_name)  # Extract tags with given class
     return papers_html
 
 def parse_mlr_proceedings(mlr_proceedings, volume):
@@ -174,7 +187,7 @@ def parse_mlr_proceedings(mlr_proceedings, volume):
 
     source = 'mlr'
     class_name = 'paper'
-    webpage_class = extract_html_elemennt(mlr_proceedings, class_name)
+    webpage_class = extract_html_class(mlr_proceedings, class_name)
 
     # Pull text from all instances of <a> tag within BodyText div
     papers = []
@@ -233,11 +246,145 @@ def parse_mlr_proceedings(mlr_proceedings, volume):
     return papers
 
 def get_mlr_proceedings(volume):
-    mlr_proceedings_url = 'http://proceedings.mlr.press/{}/'.format(volume)
-    webpage_text = load_webpage(mlr_proceedings_url)
-    mlrp_data = parse_mlr_proceedings(webpage_text, volume)
+    meta_filename = '_metadata.pkl'
+    proceedings_source = 'mlr'
+    proceedings_name = volume.replace(' ', '_').strip()
+    proceedings_dir = os.path.join(ROOT_TEMPDIR, proceedings_source, proceedings_name)
+
+    meta_file = os.path.join(proceedings_dir, meta_filename)
+    if os.path.exists(meta_file):
+        print('Pickle found: {}\nReading pickle'.format(meta_file))
+        with open(meta_file, 'rb') as pf:
+            mlrp_data = pickle.load(pf)
+    else:
+        create_global_tempdir()
+        create_dir(proceedings_dir)
+
+        mlr_proceedings_url = 'http://proceedings.mlr.press/{}/'.format(volume)
+        webpage_text = load_webpage(mlr_proceedings_url)
+        mlrp_data = parse_mlr_proceedings(webpage_text, volume)
+
+        with open(meta_file, 'wb') as pf:
+            pickle.dump(mlrp_data, pf)
+
     return mlrp_data
 
+def get_nips_url(volume_or_year):
+    nips_proceedings_repository = 'https://papers.nips.cc'
+    webpage_text = load_webpage(nips_proceedings_repository)
+    volumes_list = extract_html_tag(webpage_text, 'a')
+
+    nips_pattern = re.compile(r'(?:Advances in )?Neural Information Processing Systems (?:(?P<volume>\d{1,2}) )?\(NIPS (?P<year>\d{4})\)', re.IGNORECASE)
+    nips_by_year = {}
+    nips_by_volume = {}
+    for v in volumes_list:
+        extract = nips_pattern.search(v.contents[0])
+        if extract:
+            year = extract.group('year')
+            year = year.strip() if year is not None else year
+            volume = extract.group('volume')
+            volume = volume.strip() if volume is not None else volume
+            url = nips_proceedings_repository + v.get('href').strip()
+            if year is not None:
+                nips_by_year[year] = (url, volume, year)
+            if volume is not None:
+                nips_by_volume[volume] = (url, volume, year)
+
+    book_url = nips_by_year.get(volume_or_year)
+    if book_url is None:
+        book_url = nips_by_volume.get(volume_or_year)
+        if book_url is None:
+            raise Exception('Unknown NIPS volume or year {}'.format(volume_or_year))
+        else:
+            return book_url
+    else:
+        return book_url
+
+def get_nips_paper(url):
+    nips_proceedings_repository = 'https://papers.nips.cc'
+    pdf_url, pdf_filename, zip_sup_url, zip_sup_filename = None, None, None, None
+    paper_page = load_webpage(url)
+    paper_page_a = extract_html_tag(paper_page, 'a')
+    for a in paper_page_a:
+        a_contents = a.contents[0].strip().lower()
+        if a_contents == '[pdf]':
+            pdf_url = nips_proceedings_repository + a.get('href').strip()
+            pdf_filename = os.path.basename(pdf_url)
+        elif a_contents == '[supplemental]':
+            zip_sup_url = nips_proceedings_repository + a.get('href').strip()
+            zip_sup_filename = os.path.basename(zip_sup_url)
+    return pdf_url, pdf_filename, zip_sup_url, zip_sup_filename
+
+def get_nips_proceedings(volume_or_year):
+    nips_book_url, volume, year = get_nips_url(volume_or_year)
+
+    meta_filename = '_metadata.pkl'
+    proceedings_source = 'nips'
+    proceedings_name = year.replace(' ', '_').strip()
+    proceedings_dir = os.path.join(ROOT_TEMPDIR, proceedings_source, proceedings_name)
+
+    meta_file = os.path.join(proceedings_dir, meta_filename)
+    if os.path.exists(meta_file):
+        print('Pickle found: {}\nReading pickle'.format(meta_file))
+        with open(meta_file, 'rb') as pf:
+            nips_data = pickle.load(pf)
+    else:
+        create_global_tempdir()
+        create_dir(proceedings_dir)
+
+        webpage_text = load_webpage(nips_book_url)
+        nips_data = parse_nips_proceedings(webpage_text, year)
+
+        with open(meta_file, 'wb') as pf:
+            pickle.dump(nips_data, pf)
+
+    return nips_data
+
+def parse_nips_proceedings(nips_proceedings, volume_or_year):
+    nips_proceedings_repository = 'https://papers.nips.cc'
+
+    source = 'nips'
+    volume = volume_or_year
+    info = ''
+    pdf_sup_filename = ''
+    pdf_sup_url = ''
+
+    papers = []
+    lis = extract_html_class(nips_proceedings, 'main wrapper clearfix')[0].find_all('li')
+    for li in lis:
+        paper = {'source':source, 'volume':volume, 'info':info, 'pdf_sup_filename':pdf_sup_filename, 'pdf_sup_url':pdf_sup_url}
+        authors = []
+        title = None
+        url = None
+        for a in li.find_all('a'):
+            a_class = a.get('class')
+            a_class = '' if a_class is None else a_class[0].strip()
+            if a_class == 'author':
+                authors.append(a.contents[0].strip())
+            elif title is None and url is None:  # paper
+                title = a.contents[0].strip()
+                url = nips_proceedings_repository + a.get('href').strip()
+            else:
+                raise Exception('Double title and author in the NIPS proceedings.')
+        paper['title'] = title
+        paper['authors'] = authors
+        paper['url'] = url
+        papers.append(paper)
+
+    progress_length = len(papers)
+    print_progress(0, progress_length, prefix='Progress:', suffix='Complete', bar_length=50)
+    for i, paper in enumerate(papers):
+        paper_url = paper.get('url', '')
+        pdf_url, pdf_filename, zip_sup_url, zip_sup_filename = get_nips_paper(paper_url)
+        paper['pdf_url'] = pdf_url
+        paper['pdf_filename'] = pdf_filename
+        paper['zip_sup_url'] = zip_sup_url
+        paper['zip_sup_filename'] = zip_sup_filename
+        print_progress(i+1, progress_length, prefix='Progress:', suffix='Complete', bar_length=50)
+
+    return papers
+
+# TODO: parallelise the download
 def download_proceedings(proceedings, download=['pdf', 'pdf_sup']):
     create_global_tempdir()
     proceedings_source = proceedings[0].get('source').replace(' ', '_')
@@ -288,6 +435,7 @@ def pdf_to_string(path_to_pdf):
     contents_list = ''.join(contents_list)
     return contents_list, contents_string
 
+# TODO: parallelise the processing
 def read_proceedings(proceedings, read=['pdf', 'pdf_sup'], save_df=True):
     proceedings_source = proceedings[0].get('source').replace(' ', '_')
     proceedings_name = proceedings[0].get('volume').replace(' ', '_')
@@ -349,5 +497,86 @@ def regex_statistics(regex_df, columns=['pdf', 'pdf_sup']):
         print_string += '    {} count is {} ({:.2f}%)\n'.format(c_name,
                                                                 c_df_count,
                                                                 c_df_percent)
-
     print(print_string)
+
+def regexes_in_proceedings(regex_dict, proceedings_df, columns=['pdf', 'pdf_sup']):
+    patterns = {regex_id:re.compile(regex_dict[regex_id], re.IGNORECASE) for regex_id in regex_dict}
+
+    count_df = {}
+    # per column per regex
+    for c in columns:
+        for pattern_id in patterns:
+            c_full = c+'_regex_{}'.format(pattern_id)
+            count_df[c_full] = proceedings_df[c+'_contents'].apply(lambda x: len(patterns[pattern_id].findall(x)))
+
+    count_df = pd.DataFrame(count_df)
+
+    # total for a pdf
+    for pattern_id in patterns:
+        pattern_columns = [c+'_regex_{}'.format(pattern_id) for c in columns]
+        count_df['total_regex_{}'.format(pattern_id)] = count_df[pattern_columns].sum(axis=1)
+
+    return count_df
+
+# TODO: does not contain
+# You can get the matrix for the following entries: pdf, pdf_sup, total
+# The default is: total
+def regexes_to_matrix(regexes_counts, regexes_in=[], regexes_out=[], column_type='total'):
+    if regexes_out: raise Exception('Not implemented.')  # TODO
+
+    print('There are {} papers in this collection'.format(regexes_counts.shape[0]))
+
+    lambda_in = lambda x: 1 if x>0 else 0
+    lambda_out = lambda x: 1 if x==0 else 0
+    lambda_both = lambda x: 1 if x>1 else 0
+
+    if regexes_in:
+        columns_in = ['{}_regex_{}'.format(column_type, regex) for regex in regexes_in]
+    else:
+        pattern = '{}_regex_'.format(column_type)
+        columns_in = [i for i in regexes_counts.columns if i.startswith(pattern)]
+    columns_out = ['{}_regex_{}'.format(column_type, regex) for regex in regexes_out]
+
+    all_apply = [regexes_counts[i].apply(lambda_in) for i in columns_in]
+    all_apply = pd.DataFrame(all_apply).T
+    all_apply = all_apply.sum(axis=1)
+    all_apply = all_apply.apply(lambda x: 1 if x>=len(columns_in) else 0).sum()
+    print('All regexes apply to {} papers.'.format(all_apply))
+
+    matrix = []
+    matrix_list = list(itertools.combinations(columns_in, 1)) + list(itertools.combinations(columns_in, 2))
+    for ml in matrix_list:
+        if len(ml) == 1:
+            x = y = ml[0]
+            value = regexes_counts[x].apply(lambda_in).sum()
+        elif len(ml) == 2:
+            x, y = ml[0], ml[1]
+            df_in_one = regexes_counts[x].apply(lambda_in)
+            df_in_two = regexes_counts[y].apply(lambda_in)
+            value = (df_in_one+df_in_two).apply(lambda_both).sum()
+        else:
+            raise Exception('The matrix can only contain pairs.')
+
+        matrix.append((x, y, value))
+
+    df = {}
+    for x, y, v in matrix:
+        if x in df:
+            if y not in df[x]:
+                df[x][y] = v
+            else:
+                if df[x][y] != v: raise Exception('Value mismatch')
+        else:
+            df[x] = {y:v}
+
+        if y in df:
+            if x not in df[y]:
+                df [y][x] = v
+            else:
+                if df[y][x] != v: raise Exception('Value mismatch')
+        else:
+            df[y] = {x:v}
+
+    df = pd.DataFrame(df)
+
+    return df[df.index]
