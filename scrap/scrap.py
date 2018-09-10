@@ -454,11 +454,17 @@ def read_proceedings(proceedings, read=['pdf', 'pdf_sup'], save_df=True):
             dataset.append(paper.copy())
             for r in read:
                 filename = paper.get(r+'_filename', None)
-                if filename is not None:
-                    file_path = os.path.join(proceedings_dir, filename)
-                    cl, cs = pdf_to_string(file_path)
-                else:
+                if filename is None or filename == '':
                     cl, cs = '', ''
+                else:
+                    file_path = os.path.join(proceedings_dir, filename)
+                    try:
+                        cl, cs = pdf_to_string(file_path)
+                    except PyPDF2.utils.PdfReadError as exception:
+                        print('\nError processing `{}`. Skipping this file'.format(file_path))
+                        print(exception)
+                        cl, cs = '', ''
+
                 dataset[-1][r+'_contents'] = cs
             print_progress(i+1, progress_length, prefix='Progress:', suffix='Complete', bar_length=50)
 
