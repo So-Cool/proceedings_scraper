@@ -13,7 +13,7 @@ import requests
 import sys
 import bs4
 
-ROOT_TEMPDIR = '~/scrapper_temp_pdfs/'
+ROOT_TEMPDIR = '~/scraper_temp_pdfs/'
 FIX_PYPDF2 = True
 
 # Print iterations progress
