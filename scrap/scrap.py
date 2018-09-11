@@ -477,8 +477,14 @@ def read_proceedings(proceedings, read=['pdf', 'pdf_sup'], save_df=True):
 
     return dataset_df
 
-def regex_in_proceedings(regex, proceedings_df, columns=['pdf', 'pdf_sup']):
-    pattern = re.compile(regex, re.IGNORECASE)
+def compile_regex(regex, ignorecase=True):
+    if ignorecase:
+        return re.compile(regex, re.IGNORECASE)
+    else:
+        return re.compile(regex)
+
+def regex_in_proceedings(regex, proceedings_df, columns=['pdf', 'pdf_sup'], ignorecase=True):
+    pattern = compile_regex(regex, ignorecase)
     f = lambda x: len(pattern.findall(x))
 
     count_df = {}
@@ -505,8 +511,8 @@ def regex_statistics(regex_df, columns=['pdf', 'pdf_sup']):
                                                                 c_df_percent)
     print(print_string)
 
-def regexes_in_proceedings(regex_dict, proceedings_df, columns=['pdf', 'pdf_sup']):
-    patterns = {regex_id:re.compile(regex_dict[regex_id], re.IGNORECASE) for regex_id in regex_dict}
+def regexes_in_proceedings(regex_dict, proceedings_df, columns=['pdf', 'pdf_sup'], ignorecase=True):
+    patterns = {regex_id:compile_regex(regex_dict[regex_id], ignorecase) for regex_id in regex_dict}
 
     count_df = {}
     # per column per regex
