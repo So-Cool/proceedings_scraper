@@ -55,36 +55,39 @@ def parse_new_aaai(paper_url):
     paper_webpage = load_webpage(paper_url)
     paper_soup = soup_up(paper_webpage)
 
+    try:
+        # Track/ info
+        track = paper_soup.find_all('div', {'id': 'breadcrumb'})[0].find_all('a')
+        info = track[-2].contents[0].strip()
 
-    # Track/ info
-    track = paper_soup.find_all('div', {'id': 'breadcrumb'})[0].find_all('a')
-    info = track[-2].contents[0].strip()
+        # Title
+        title = paper_soup.find_all('div', {'id': 'title'})
+        title = title[0].contents[0].strip()
 
-    # Title
-    title = paper_soup.find_all('div', {'id': 'title'})
-    title = title[0].contents[0].strip()
+        # Authors
+        authors = paper_soup.find_all('div', {'id': 'author'})
+        authors = [a.strip() for a in authors[0].text.split(',')]
 
-    # Authors
-    authors = paper_soup.find_all('div', {'id': 'author'})
-    authors = [a.strip() for a in authors[0].text.split(',')]
+        # Abstract
+        abstract = paper_soup.find_all('div', {'id': 'abstract'})
+        abstract = abstract[0].find_all('div')[0].text.strip()
 
-    # Abstract
-    abstract = paper_soup.find_all('div', {'id': 'abstract'})
-    abstract = abstract[0].find_all('div')[0].text.strip()
+        # PDF url and file name
+        pdf = paper_soup.find_all('div', {'id': 'paper'})
+        pdf_url = None
+        pdf_filename = None
+        for p in pdf[0].find_all('a'):
+            if 'pdf' in p.text.lower():
+                pdf_url = p.get('href')
+                break
+        if pdf_url is not None:
+            pdf_url = pdf_url.replace('/view/', '/download/')
+            pdf_filename = '{}.pdf'.format('-'.join(pdf_url.split('/')[-2:]))
 
-    # PDF url and file name
-    pdf = paper_soup.find_all('div', {'id': 'paper'})
-    pdf_url = None
-    pdf_filename = None
-    for p in pdf[0].find_all('a'):
-        if 'pdf' in p.text.lower():
-            pdf_url = p.get('href')
-            break
-    if pdf_url is not None:
-        pdf_url = pdf_url.replace('/view/', '/download/')
-        pdf_filename = '{}.pdf'.format('-'.join(pdf_url.split('/')[-2:]))
-
-    return info, title, authors, pdf_url, pdf_filename
+        return info, title, authors, pdf_url, pdf_filename
+    except IndexError:
+        print('\nSkipping (unreadable web page): {}'.format(paper_url))
+        return None, None, None, None, None
 
 def get_old_urti_aaai(aaai_page):
     # Get url
