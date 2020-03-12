@@ -107,7 +107,7 @@ def parse_nips_proceedings(nips_proceedings, volume_or_year):
             if a_class == 'author':
                 authors.append(a.contents[0].strip())
             elif title is None and url is None:  # paper
-                title = a.contents[0].strip()
+                title = ''.join([str(x).strip() for x in a.contents])
                 url = nips_proceedings_repository + a.get('href').strip()
             else:
                 raise Exception('Double title and author in the NIPS proceedings.')
