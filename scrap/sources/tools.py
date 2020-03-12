@@ -14,7 +14,7 @@ def get_proceedings(source, volume_year):
         return aaai.get_aaai_proceedings(volume_year)
     elif 'icml' in source or 'mlr' in source:
         return mlr.get_mlr_proceedings(volume_year)
-    elif 'nips' in source:
+    elif ('nips' in source) or ('neurips' in source):
         return nips.get_nips_proceedings(volume_year)
     else:
         print('Unknown proceedings source: {}. The scraper only supports: NIPS'
