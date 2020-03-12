@@ -257,7 +257,7 @@ def read_proceedings(proceedings, read=['pdf', 'pdf_sup'], save_df=True):
                     file_path = os.path.join(proceedings_dir, filename)
                     try:
                         cl, cs = pdf_to_string(file_path)
-                    except PyPDF2.utils.PdfReadError as exception:
+                    except (PyPDF2.utils.PdfReadError, AssertionError, OSError) as exception:
                         print('\nError processing `{}`. Skipping this file'.format(file_path))
                         print(exception)
                         cl, cs = '', ''
